@@ -1,0 +1,137 @@
+name: Build GhostTeleKill_v4 NDK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:   # Cho phép chạy thủ công trên GitHub UI
+
+# ==================== BIẾN MÔI TRƯỜNG ====================
+env:
+  NDK_VERSION:   "26.3.11579264"
+  BUILD_DIR:     "app/src/main/jni"
+  OUTPUT_DIR:    "app/src/main/libs"
+  LIB_NAME:      "ghost_telekill"
+
+jobs:
+  build-ndk:
+    name: Build Android NDK (${{ matrix.abi }})
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        abi: [ armeabi-v7a, arm64-v8a, x86, x86_64 ]
+
+    steps:
+      # ── 1. Checkout source ───────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Cài Android NDK ──────────────────────────────────────────
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: "11076708"
+
+      - name: Install NDK ${{ env.NDK_VERSION }}
+        run: |
+          sdkmanager "ndk;${{ env.NDK_VERSION }}"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      # ── 3. Tạo Android.mk nếu chưa có ──────────────────────────────
+      - name: Generate Android.mk (nếu chưa tồn tại)
+        run: |
+          mkdir -p ${{ env.BUILD_DIR }}
+          if [ ! -f "${{ env.BUILD_DIR }}/Android.mk" ]; then
+            cat > ${{ env.BUILD_DIR }}/Android.mk << 'EOF'
+          LOCAL_PATH := $(call my-dir)
+
+          include $(CLEAR_VARS)
+          LOCAL_MODULE    := ghost_telekill
+          LOCAL_SRC_FILES := ghost_telekill.c
+          LOCAL_LDLIBS    := -llog -lm
+          LOCAL_CFLAGS    := -O2 -Wall -Wextra -fvisibility=hidden \
+                             -DANDROID -DNDEBUG
+          include $(BUILD_SHARED_LIBRARY)
+          EOF
+          fi
+
+      # ── 4. Tạo Application.mk nếu chưa có ──────────────────────────
+      - name: Generate Application.mk (nếu chưa tồn tại)
+        run: |
+          if [ ! -f "${{ env.BUILD_DIR }}/Application.mk" ]; then
+            cat > ${{ env.BUILD_DIR }}/Application.mk << 'EOF'
+          APP_ABI     := armeabi-v7a arm64-v8a x86 x86_64
+          APP_STL     := c++_static
+          APP_OPTIM   := release
+          APP_PLATFORM:= android-21
+          EOF
+          fi
+
+      # ── 5. Chạy ndk-build cho ABI hiện tại ─────────────────────────
+      - name: ndk-build (${{ matrix.abi }})
+        run: |
+          $NDK_HOME/ndk-build \
+            NDK_PROJECT_PATH=. \
+            NDK_APPLICATION_MK=${{ env.BUILD_DIR }}/Application.mk \
+            APP_BUILD_SCRIPT=${{ env.BUILD_DIR }}/Android.mk \
+            NDK_OUT=build/obj \
+            NDK_LIBS_OUT=${{ env.OUTPUT_DIR }} \
+            APP_ABI=${{ matrix.abi }} \
+            -j$(nproc)
+
+      # ── 6. Kiểm tra output ──────────────────────────────────────────
+      - name: Verify .so output
+        run: |
+          SO_PATH="${{ env.OUTPUT_DIR }}/${{ matrix.abi }}/lib${{ env.LIB_NAME }}.so"
+          if [ ! -f "$SO_PATH" ]; then
+            echo "::error::Không tìm thấy $SO_PATH"
+            exit 1
+          fi
+          echo "✅ Build thành công: $SO_PATH"
+          ls -lh "$SO_PATH"
+          file "$SO_PATH"
+
+      # ── 7. Upload artifact cho từng ABI ────────────────────────────
+      - name: Upload .so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib${{ env.LIB_NAME }}-${{ matrix.abi }}
+          path: ${{ env.OUTPUT_DIR }}/${{ matrix.abi }}/lib${{ env.LIB_NAME }}.so
+          retention-days: 30
+
+  # ── Job gộp tất cả ABI thành 1 artifact ───────────────────────────
+  merge-artifacts:
+    name: Merge all ABIs
+    runs-on: ubuntu-22.04
+    needs: build-ndk
+
+    steps:
+      - name: Download all ABI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: merged_libs
+
+      - name: Reorganize folder structure
+        run: |
+          mkdir -p final_libs
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            src="merged_libs/libghost_telekill-${abi}/libghost_telekill.so"
+            dst="final_libs/${abi}/libghost_telekill.so"
+            mkdir -p "final_libs/${abi}"
+            if [ -f "$src" ]; then
+              cp "$src" "$dst"
+              echo "✅ $abi OK"
+            else
+              echo "::warning::Thiếu $abi"
+            fi
+          done
+          find final_libs -name "*.so" | sort
+
+      - name: Upload merged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libghost_telekill-ALL-ABIs
+          path: final_libs/
+          retention-days: 90
