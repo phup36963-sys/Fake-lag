@@ -2,8 +2,7 @@ name: Build GhostTeleKill NDK
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -21,14 +20,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Android SDK
+      - name: Setup Android
         uses: android-actions/setup-android@v3
 
       - name: Install NDK
         run: |
           yes | sdkmanager --licenses
           yes | sdkmanager "ndk;26.3.11579264"
-          echo "NDK=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> $GITHUB_ENV
 
       - name: Prepare folders
         run: |
@@ -37,37 +36,37 @@ jobs:
 
       - name: Create Android.mk
         run: |
-          echo 'LOCAL_PATH := $(call my-dir)' > app/src/main/jni/Android.mk
-          echo 'include $(CLEAR_VARS)' >> app/src/main/jni/Android.mk
-          echo 'LOCAL_MODULE := ghost_telekill' >> app/src/main/jni/Android.mk
-          echo 'LOCAL_SRC_FILES := ghost_telekill.c' >> app/src/main/jni/Android.mk
-          echo 'LOCAL_LDLIBS := -llog -lm' >> app/src/main/jni/Android.mk
-          echo 'include $(BUILD_SHARED_LIBRARY)' >> app/src/main/jni/Android.mk
+          printf "LOCAL_PATH := \$(call my-dir)\n" > app/src/main/jni/Android.mk
+          printf "include \$(CLEAR_VARS)\n" >> app/src/main/jni/Android.mk
+          printf "LOCAL_MODULE := ghost_telekill\n" >> app/src/main/jni/Android.mk
+          printf "LOCAL_SRC_FILES := ghost_telekill.c\n" >> app/src/main/jni/Android.mk
+          printf "LOCAL_LDLIBS := -llog -lm\n" >> app/src/main/jni/Android.mk
+          printf "include \$(BUILD_SHARED_LIBRARY)\n" >> app/src/main/jni/Android.mk
 
       - name: Create Application.mk
         run: |
-          echo 'APP_ABI := armeabi-v7a arm64-v8a x86 x86_64' > app/src/main/jni/Application.mk
-          echo 'APP_PLATFORM := android-21' >> app/src/main/jni/Application.mk
-          echo 'APP_STL := c++_static' >> app/src/main/jni/Application.mk
+          printf "APP_ABI := armeabi-v7a arm64-v8a x86 x86_64\n" > app/src/main/jni/Application.mk
+          printf "APP_PLATFORM := android-21\n" >> app/src/main/jni/Application.mk
+          printf "APP_STL := c++_static\n" >> app/src/main/jni/Application.mk
 
       - name: Create source
         run: |
-          echo '#include <jni.h>' > app/src/main/jni/ghost_telekill.c
-          echo '#include <android/log.h>' >> app/src/main/jni/ghost_telekill.c
-          echo '#define LOG_TAG "GhostTeleKill"' >> app/src/main/jni/ghost_telekill.c
-          echo '#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)' >> app/src/main/jni/ghost_telekill.c
-          echo 'JNIEXPORT void JNICALL Java_test(JNIEnv* env, jobject obj){ LOGI("GhostTeleKill Loaded"); }' >> app/src/main/jni/ghost_telekill.c
+          printf "#include <jni.h>\n" > app/src/main/jni/ghost_telekill.c
+          printf "#include <android/log.h>\n" >> app/src/main/jni/ghost_telekill.c
+          printf "#define LOG_TAG \"GhostTeleKill\"\n" >> app/src/main/jni/ghost_telekill.c
+          printf "#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)\n" >> app/src/main/jni/ghost_telekill.c
+          printf "JNIEXPORT void JNICALL Java_test(JNIEnv* env,jobject obj){LOGI(\"GhostTeleKill Loaded\");}\n" >> app/src/main/jni/ghost_telekill.c
 
       - name: Build
         run: |
-          $NDK/ndk-build \
+          $NDK_HOME/ndk-build \
           NDK_PROJECT_PATH=. \
           APP_BUILD_SCRIPT=app/src/main/jni/Android.mk \
           NDK_APPLICATION_MK=app/src/main/jni/Application.mk \
           NDK_LIBS_OUT=app/src/main/libs \
           APP_ABI=${{ matrix.abi }}
 
-      - name: Upload .so
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: ghost-${{ matrix.abi }}
