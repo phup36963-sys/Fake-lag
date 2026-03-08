@@ -1,26 +1,19 @@
-name: Build GhostTeleKill NDK
+name: Build NDK
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
-
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Android
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install NDK
@@ -28,29 +21,32 @@ jobs:
           yes | sdkmanager --licenses
           yes | sdkmanager "ndk;26.3.11579264"
 
+      - name: Show SDK info (debug)
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls $ANDROID_SDK_ROOT
+          ls $ANDROID_SDK_ROOT/ndk
+
       - name: Prepare project
         run: |
-          mkdir -p app/src/main/jni
-          mkdir -p app/src/main/libs
+          mkdir -p jni
+          mkdir -p libs
 
       - name: Create Android.mk
         run: |
-          cat > app/src/main/jni/Android.mk << 'EOF'
+          cat > jni/Android.mk << 'EOF'
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
-
 LOCAL_MODULE := ghost_telekill
 LOCAL_SRC_FILES := ghost_telekill.c
-
 LOCAL_LDLIBS := -llog -lm
-
 include $(BUILD_SHARED_LIBRARY)
 EOF
 
       - name: Create Application.mk
         run: |
-          cat > app/src/main/jni/Application.mk << 'EOF'
+          cat > jni/Application.mk << 'EOF'
 APP_ABI := armeabi-v7a arm64-v8a x86 x86_64
 APP_PLATFORM := android-21
 APP_STL := c++_static
@@ -58,7 +54,7 @@ EOF
 
       - name: Create source
         run: |
-          cat > app/src/main/jni/ghost_telekill.c << 'EOF'
+          cat > jni/ghost_telekill.c << 'EOF'
 #include <jni.h>
 #include <android/log.h>
 
@@ -75,15 +71,14 @@ EOF
         run: |
           NDK=$ANDROID_SDK_ROOT/ndk/26.3.11579264
           chmod +x $NDK/ndk-build
-          $NDK/ndk-build \
-          NDK_PROJECT_PATH=. \
-          APP_BUILD_SCRIPT=app/src/main/jni/Android.mk \
-          NDK_APPLICATION_MK=app/src/main/jni/Application.mk \
-          NDK_LIBS_OUT=app/src/main/libs \
-          APP_ABI=${{ matrix.abi }}
+          $NDK/ndk-build NDK_PROJECT_PATH=. NDK_LIBS_OUT=libs
+
+      - name: List output
+        run: |
+          find libs
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ghost-${{ matrix.abi }}
-          path: app/src/main/libs/${{ matrix.abi }}/libghost_telekill.so
+          name: ghost-libs
+          path: libs/
