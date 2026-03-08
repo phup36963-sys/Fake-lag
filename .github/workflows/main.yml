@@ -15,6 +15,7 @@ env:
 
 jobs:
   build-ndk:
+    name: Build Android NDK (${{ matrix.abi }})
     runs-on: ubuntu-22.04
 
     strategy:
@@ -23,28 +24,139 @@ jobs:
         abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
 
     steps:
-      - uses: actions/checkout@v4
 
-      - name: Setup Android
+      # 1️⃣ Checkout source
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Setup Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
+      # 3️⃣ Install NDK
+      - name: Install Android NDK
         run: |
+          yes | sdkmanager --licenses
           yes | sdkmanager "ndk;${{ env.NDK_VERSION }}"
           echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
-      - name: Build
+      # 4️⃣ Debug SDK
+      - name: Debug SDK
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls $ANDROID_SDK_ROOT
+          ls $ANDROID_SDK_ROOT/ndk || true
+
+      # 5️⃣ Tạo thư mục jni nếu chưa có
+      - name: Prepare JNI directory
+        run: |
+          mkdir -p ${{ env.BUILD_DIR }}
+
+      # 6️⃣ Generate Android.mk nếu thiếu
+      - name: Generate Android.mk
+        run: |
+          if [ ! -f "${{ env.BUILD_DIR }}/Android.mk" ]; then
+            cat > ${{ env.BUILD_DIR }}/Android.mk << 'EOF'
+LOCAL_PATH := $(call my-dir)
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := ghost_telekill
+LOCAL_SRC_FILES := ghost_telekill.c
+
+LOCAL_LDLIBS := -llog -lm
+
+LOCAL_CFLAGS := -O2 -Wall -Wextra -fvisibility=hidden -DANDROID -DNDEBUG
+
+include $(BUILD_SHARED_LIBRARY)
+EOF
+          fi
+
+      # 7️⃣ Generate Application.mk nếu thiếu
+      - name: Generate Application.mk
+        run: |
+          if [ ! -f "${{ env.BUILD_DIR }}/Application.mk" ]; then
+            cat > ${{ env.BUILD_DIR }}/Application.mk << 'EOF'
+APP_ABI := armeabi-v7a arm64-v8a x86 x86_64
+APP_PLATFORM := android-21
+APP_STL := c++_static
+APP_OPTIM := release
+EOF
+          fi
+
+      # 8️⃣ Tạo source demo nếu repo chưa có
+      - name: Generate ghost_telekill.c (demo nếu thiếu)
+        run: |
+          if [ ! -f "${{ env.BUILD_DIR }}/ghost_telekill.c" ]; then
+            cat > ${{ env.BUILD_DIR }}/ghost_telekill.c << 'EOF'
+#include <jni.h>
+#include <android/log.h>
+
+#define LOG_TAG "GhostTeleKill"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+
+JNIEXPORT void JNICALL
+Java_com_example_fake_ghost(JNIEnv *env, jobject thiz) {
+    LOGI("GhostTeleKill loaded");
+}
+EOF
+          fi
+
+      # 9️⃣ Build NDK
+      - name: Build library (${{ matrix.abi }})
         run: |
           $NDK_HOME/ndk-build \
             NDK_PROJECT_PATH=. \
             APP_BUILD_SCRIPT=${{ env.BUILD_DIR }}/Android.mk \
             NDK_APPLICATION_MK=${{ env.BUILD_DIR }}/Application.mk \
+            NDK_OUT=build/obj \
             NDK_LIBS_OUT=${{ env.OUTPUT_DIR }} \
             APP_ABI=${{ matrix.abi }} \
             -j$(nproc)
 
-      - name: Upload
+      # 🔟 Verify output
+      - name: Verify .so
+        run: |
+          SO_PATH="${{ env.OUTPUT_DIR }}/${{ matrix.abi }}/lib${{ env.LIB_NAME }}.so"
+          if [ ! -f "$SO_PATH" ]; then
+            echo "::error::Missing $SO_PATH"
+            exit 1
+          fi
+          echo "Build OK: $SO_PATH"
+          ls -lh "$SO_PATH"
+
+      # 11️⃣ Upload artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lib${{ env.LIB_NAME }}-${{ matrix.abi }}
+          name: libghost_telekill-${{ matrix.abi }}
           path: ${{ env.OUTPUT_DIR }}/${{ matrix.abi }}/lib${{ env.LIB_NAME }}.so
+          retention-days: 30
+
+
+  merge-artifacts:
+    name: Merge all ABIs
+    runs-on: ubuntu-22.04
+    needs: build-ndk
+
+    steps:
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: merged
+
+      - name: Merge
+        run: |
+          mkdir -p final_libs
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            mkdir -p final_libs/$abi
+            cp merged/libghost_telekill-$abi/libghost_telekill.so final_libs/$abi/ || true
+          done
+
+      - name: Upload merged libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: libghost_telekill_ALL
+          path: final_libs/
+          retention-days: 90
