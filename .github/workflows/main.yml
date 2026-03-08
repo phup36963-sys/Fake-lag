@@ -1,17 +1,13 @@
-name: Build GhostTeleKill_v4 NDK
+name: Build GhostTeleKill NDK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
-env:
-  NDK_VERSION: "26.3.11579264"
-  BUILD_DIR: app/src/main/jni
-  OUTPUT_DIR: app/src/main/libs
-  LIB_NAME: ghost_telekill
-
 jobs:
+
   build:
     runs-on: ubuntu-22.04
 
@@ -22,70 +18,57 @@ jobs:
 
     steps:
 
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Android
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install NDK
         run: |
           yes | sdkmanager --licenses
-          yes | sdkmanager "ndk;${{ env.NDK_VERSION }}"
-          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+          yes | sdkmanager "ndk;26.3.11579264"
+          echo "NDK=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> $GITHUB_ENV
 
-      - name: Prepare JNI folder
-        run: mkdir -p ${{ env.BUILD_DIR }}
+      - name: Prepare folders
+        run: |
+          mkdir -p app/src/main/jni
+          mkdir -p app/src/main/libs
 
       - name: Create Android.mk
         run: |
-          cat > ${{ env.BUILD_DIR }}/Android.mk << 'EOF'
-LOCAL_PATH := $(call my-dir)
-
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := ghost_telekill
-LOCAL_SRC_FILES := ghost_telekill.c
-
-LOCAL_LDLIBS := -llog -lm
-
-include $(BUILD_SHARED_LIBRARY)
-EOF
+          echo 'LOCAL_PATH := $(call my-dir)' > app/src/main/jni/Android.mk
+          echo 'include $(CLEAR_VARS)' >> app/src/main/jni/Android.mk
+          echo 'LOCAL_MODULE := ghost_telekill' >> app/src/main/jni/Android.mk
+          echo 'LOCAL_SRC_FILES := ghost_telekill.c' >> app/src/main/jni/Android.mk
+          echo 'LOCAL_LDLIBS := -llog -lm' >> app/src/main/jni/Android.mk
+          echo 'include $(BUILD_SHARED_LIBRARY)' >> app/src/main/jni/Android.mk
 
       - name: Create Application.mk
         run: |
-          cat > ${{ env.BUILD_DIR }}/Application.mk << 'EOF'
-APP_ABI := armeabi-v7a arm64-v8a x86 x86_64
-APP_PLATFORM := android-21
-APP_STL := c++_static
-EOF
+          echo 'APP_ABI := armeabi-v7a arm64-v8a x86 x86_64' > app/src/main/jni/Application.mk
+          echo 'APP_PLATFORM := android-21' >> app/src/main/jni/Application.mk
+          echo 'APP_STL := c++_static' >> app/src/main/jni/Application.mk
 
-      - name: Create demo source
+      - name: Create source
         run: |
-          cat > ${{ env.BUILD_DIR }}/ghost_telekill.c << 'EOF'
-#include <jni.h>
-#include <android/log.h>
+          echo '#include <jni.h>' > app/src/main/jni/ghost_telekill.c
+          echo '#include <android/log.h>' >> app/src/main/jni/ghost_telekill.c
+          echo '#define LOG_TAG "GhostTeleKill"' >> app/src/main/jni/ghost_telekill.c
+          echo '#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)' >> app/src/main/jni/ghost_telekill.c
+          echo 'JNIEXPORT void JNICALL Java_test(JNIEnv* env, jobject obj){ LOGI("GhostTeleKill Loaded"); }' >> app/src/main/jni/ghost_telekill.c
 
-#define LOG_TAG "GhostTeleKill"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-
-JNIEXPORT void JNICALL
-Java_com_example_test(JNIEnv *env, jobject thiz) {
-    LOGI("GhostTeleKill Loaded");
-}
-EOF
-
-      - name: Build NDK
+      - name: Build
         run: |
-          $NDK_HOME/ndk-build \
+          $NDK/ndk-build \
           NDK_PROJECT_PATH=. \
-          APP_BUILD_SCRIPT=${{ env.BUILD_DIR }}/Android.mk \
-          NDK_APPLICATION_MK=${{ env.BUILD_DIR }}/Application.mk \
-          NDK_LIBS_OUT=${{ env.OUTPUT_DIR }} \
+          APP_BUILD_SCRIPT=app/src/main/jni/Android.mk \
+          NDK_APPLICATION_MK=app/src/main/jni/Application.mk \
+          NDK_LIBS_OUT=app/src/main/libs \
           APP_ABI=${{ matrix.abi }}
 
-      - name: Upload artifact
+      - name: Upload .so
         uses: actions/upload-artifact@v4
         with:
-          name: libghost-${{ matrix.abi }}
-          path: ${{ env.OUTPUT_DIR }}/${{ matrix.abi }}/libghost_telekill.so
+          name: ghost-${{ matrix.abi }}
+          path: app/src/main/libs/${{ matrix.abi }}/libghost_telekill.so
