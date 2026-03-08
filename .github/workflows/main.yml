@@ -2,13 +2,13 @@ name: Build GhostTeleKill NDK
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
 
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
@@ -27,39 +27,55 @@ jobs:
         run: |
           yes | sdkmanager --licenses
           yes | sdkmanager "ndk;26.3.11579264"
-          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> $GITHUB_ENV
 
-      - name: Prepare folders
+      - name: Prepare project
         run: |
           mkdir -p app/src/main/jni
           mkdir -p app/src/main/libs
 
       - name: Create Android.mk
         run: |
-          printf "LOCAL_PATH := \$(call my-dir)\n" > app/src/main/jni/Android.mk
-          printf "include \$(CLEAR_VARS)\n" >> app/src/main/jni/Android.mk
-          printf "LOCAL_MODULE := ghost_telekill\n" >> app/src/main/jni/Android.mk
-          printf "LOCAL_SRC_FILES := ghost_telekill.c\n" >> app/src/main/jni/Android.mk
-          printf "LOCAL_LDLIBS := -llog -lm\n" >> app/src/main/jni/Android.mk
-          printf "include \$(BUILD_SHARED_LIBRARY)\n" >> app/src/main/jni/Android.mk
+          cat > app/src/main/jni/Android.mk << 'EOF'
+LOCAL_PATH := $(call my-dir)
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := ghost_telekill
+LOCAL_SRC_FILES := ghost_telekill.c
+
+LOCAL_LDLIBS := -llog -lm
+
+include $(BUILD_SHARED_LIBRARY)
+EOF
 
       - name: Create Application.mk
         run: |
-          printf "APP_ABI := armeabi-v7a arm64-v8a x86 x86_64\n" > app/src/main/jni/Application.mk
-          printf "APP_PLATFORM := android-21\n" >> app/src/main/jni/Application.mk
-          printf "APP_STL := c++_static\n" >> app/src/main/jni/Application.mk
+          cat > app/src/main/jni/Application.mk << 'EOF'
+APP_ABI := armeabi-v7a arm64-v8a x86 x86_64
+APP_PLATFORM := android-21
+APP_STL := c++_static
+EOF
 
       - name: Create source
         run: |
-          printf "#include <jni.h>\n" > app/src/main/jni/ghost_telekill.c
-          printf "#include <android/log.h>\n" >> app/src/main/jni/ghost_telekill.c
-          printf "#define LOG_TAG \"GhostTeleKill\"\n" >> app/src/main/jni/ghost_telekill.c
-          printf "#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)\n" >> app/src/main/jni/ghost_telekill.c
-          printf "JNIEXPORT void JNICALL Java_test(JNIEnv* env,jobject obj){LOGI(\"GhostTeleKill Loaded\");}\n" >> app/src/main/jni/ghost_telekill.c
+          cat > app/src/main/jni/ghost_telekill.c << 'EOF'
+#include <jni.h>
+#include <android/log.h>
+
+#define LOG_TAG "GhostTeleKill"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+
+JNIEXPORT void JNICALL
+Java_test(JNIEnv* env, jobject obj) {
+    LOGI("GhostTeleKill Loaded");
+}
+EOF
 
       - name: Build
         run: |
-          $NDK_HOME/ndk-build \
+          NDK=$ANDROID_SDK_ROOT/ndk/26.3.11579264
+          chmod +x $NDK/ndk-build
+          $NDK/ndk-build \
           NDK_PROJECT_PATH=. \
           APP_BUILD_SCRIPT=app/src/main/jni/Android.mk \
           NDK_APPLICATION_MK=app/src/main/jni/Application.mk \
